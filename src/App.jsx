@@ -67,7 +67,7 @@ export default function App() {
     if (found) {
       setCity(found.name)
       setCurrentCoords({ lat: found.lat, lon: found.lon })
-      fetchWeather(found.name)
+      fetchWeather(found.lat, found.lon)
     } else {
       setError(`找不到「${cityName}」，請從建議中選擇或試試其他城鎮名稱`)
       setLoading(false)
@@ -93,20 +93,17 @@ export default function App() {
   const loadFavorite = (fav) => {
     setCity(fav.name)
     setCurrentCoords({ lat: fav.lat, lon: fav.lon })
-    fetchWeather(fav.name)
+    fetchWeather(fav.lat, fav.lon)
   }
 
   // 判斷當前城市是否已收藏
   const isFavorited = favorites.some(fav => fav.name === city)
 
-  // 獲取天氣數據 - 使用中央氣象署 API
-  const CWA_API_KEY = 'CWA-E142368F-F6DA-457A-AEDF-3D5BCF20BFF1'
-
-  const fetchWeather = async (cityName) => {
+  // 獲取天氣數據 - 使用 Open-Meteo API
+  const fetchWeather = async (lat, lon) => {
     try {
-      const cwaUrl = `https://opendata.cwa.gov.tw/api/v1/rest/forecasts?locationName=${encodeURIComponent(cityName)}&Authorization=${CWA_API_KEY}`
-      const url = `https://weather.sky123454187.workers.dev/?url=${encodeURIComponent(cwaUrl)}`
-      console.log('Fetching weather from CWA via Worker:', url)
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&forecast_days=7&timezone=Asia/Taipei&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code`
+      console.log('Fetching weather from Open-Meteo:', url)
 
       const response = await fetch(url)
       console.log('Response status:', response.status)
@@ -115,22 +112,11 @@ export default function App() {
         throw new Error(`API error: ${response.status}`)
       }
 
-      const responseText = await response.text()
-      console.log('Raw response:', responseText.substring(0, 500))
-
-      let data
-      try {
-        data = JSON.parse(responseText)
-      } catch (e) {
-        throw new Error(`Invalid JSON response: ${responseText.substring(0, 200)}`)
-      }
+      const data = await response.json()
       console.log('Weather data received:', data)
 
-      if (data.records && data.records.location && data.records.location.length > 0) {
-        const location = data.records.location[0]
-
-        // 提取當前天氣和預報
-        const weatherData = processWeatherData(location.weatherElement)
+      if (data.current && data.daily) {
+        const weatherData = processWeatherData(data)
         setWeather(weatherData.current)
         setForecast(weatherData.forecast)
         setError('')
@@ -145,55 +131,24 @@ export default function App() {
     }
   }
 
-  // 處理中央氣象署的天氣數據
-  const processWeatherData = (weatherElements) => {
-    const current = {}
-    const forecast = { time: [], temperature_2m_max: [], temperature_2m_min: [], precipitation_probability_max: [], weather_code: [] }
+  // 處理 Open-Meteo 的天氣數據
+  const processWeatherData = (data) => {
+    const current = {
+      temperature_2m: data.current.temperature_2m,
+      relative_humidity_2m: data.current.relative_humidity_2m,
+      weather_code: data.current.weather_code,
+      wind_speed_10m: data.current.wind_speed_10m
+    }
 
-    weatherElements.forEach(element => {
-      const name = element.elementName
-      if (element.time && element.time.length > 0) {
-        const firstTime = element.time[0]
-
-        // 處理當前天氣
-        if (name === '氣溫') current.temperature_2m = parseFloat(firstTime.parameter?.parameterValue) || 0
-        if (name === '相對濕度') current.relative_humidity_2m = parseInt(firstTime.parameter?.parameterValue) || 0
-        if (name === '風速' || name === '風速(平均)') current.wind_speed_10m = parseFloat(firstTime.parameter?.parameterValue) * 3.6 || 0 // 轉換為 km/h
-        if (name === '天氣現象') current.weather_code = getWeatherCode(firstTime.parameter?.parameterValue)
-
-        // 處理預報資料
-        if (name === '最高溫度') {
-          element.time.forEach(t => forecast.temperature_2m_max.push(parseFloat(t.parameter?.parameterValue) || 0))
-          element.time.forEach(t => forecast.time.push(t.startTime?.split('T')[0]))
-        }
-        if (name === '最低溫度') {
-          element.time.forEach(t => forecast.temperature_2m_min.push(parseFloat(t.parameter?.parameterValue) || 0))
-        }
-        if (name === '降雨機率') {
-          element.time.forEach(t => forecast.precipitation_probability_max.push(parseInt(t.parameter?.parameterValue) || 0))
-        }
-        if (name === '天氣現象') {
-          element.time.forEach(t => forecast.weather_code.push(getWeatherCode(t.parameter?.parameterValue)))
-        }
-      }
-    })
+    const forecast = {
+      time: data.daily.time,
+      temperature_2m_max: data.daily.temperature_2m_max,
+      temperature_2m_min: data.daily.temperature_2m_min,
+      precipitation_probability_max: data.daily.precipitation_probability_max,
+      weather_code: data.daily.weather_code
+    }
 
     return { current, forecast }
-  }
-
-  // 將中央氣象署天氣代碼轉換為 WMO 代碼
-  const getWeatherCode = (cwaDescription) => {
-    if (!cwaDescription) return 0
-    const desc = cwaDescription.toLowerCase()
-
-    if (desc.includes('晴')) return 0
-    if (desc.includes('多雲') || desc.includes('陰')) return 3
-    if (desc.includes('陣雨') || desc.includes('雷')) return 80
-    if (desc.includes('雨')) return 61
-    if (desc.includes('雪')) return 71
-    if (desc.includes('霧')) return 45
-
-    return 0
   }
 
   // 首次載入時搜索預設城市
@@ -201,7 +156,7 @@ export default function App() {
     const defaultCity = taiwanLocations.find(loc => loc.name === city)
     if (defaultCity) {
       setCurrentCoords({ lat: defaultCity.lat, lon: defaultCity.lon })
-      fetchWeather(city)
+      fetchWeather(defaultCity.lat, defaultCity.lon)
     }
   }, [])
 
@@ -254,7 +209,7 @@ export default function App() {
     setCurrentCoords({ lat: location.lat, lon: location.lon })
     setSearchInput('')
     setSuggestions([])
-    fetchWeather(location.name)
+    fetchWeather(location.lat, location.lon)
   }
 
   // 比較模式：加入城市到比較列表
@@ -303,14 +258,12 @@ export default function App() {
       const fav = favorites.find(f => f.name === favName)
       if (fav) {
         try {
-          const cwaUrl = `https://opendata.cwa.gov.tw/api/v1/rest/forecasts?locationName=${encodeURIComponent(favName)}&Authorization=${CWA_API_KEY}`
-          const url = `https://weather.sky123454187.workers.dev/?url=${encodeURIComponent(cwaUrl)}`
+          const url = `https://api.open-meteo.com/v1/forecast?latitude=${fav.lat}&longitude=${fav.lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&forecast_days=7&timezone=Asia/Taipei&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code`
           const response = await fetch(url)
           const data = await response.json()
 
-          if (data.records && data.records.location && data.records.location.length > 0) {
-            const location = data.records.location[0]
-            const weatherData = processWeatherData(location.weatherElement)
+          if (data.current && data.daily) {
+            const weatherData = processWeatherData(data)
             newCompareList.push({
               name: fav.name,
               lat: fav.lat,
