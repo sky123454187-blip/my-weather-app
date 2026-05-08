@@ -104,8 +104,9 @@ export default function App() {
 
   const fetchWeather = async (cityName) => {
     try {
-      const url = `https://opendata.cwa.gov.tw/api/v1/rest/forecasts?locationName=${encodeURIComponent(cityName)}&Authorization=${CWA_API_KEY}`
-      console.log('Fetching weather from CWA:', url)
+      const cwaUrl = `https://opendata.cwa.gov.tw/api/v1/rest/forecasts?locationName=${encodeURIComponent(cityName)}&Authorization=${CWA_API_KEY}`
+      const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(cwaUrl)}`
+      console.log('Fetching weather from CWA via proxy:', url)
 
       const response = await fetch(url)
       console.log('Response status:', response.status)
@@ -294,7 +295,8 @@ export default function App() {
       const fav = favorites.find(f => f.name === favName)
       if (fav) {
         try {
-          const url = `https://opendata.cwa.gov.tw/api/v1/rest/forecasts?locationName=${encodeURIComponent(favName)}&Authorization=${CWA_API_KEY}`
+          const cwaUrl = `https://opendata.cwa.gov.tw/api/v1/rest/forecasts?locationName=${encodeURIComponent(favName)}&Authorization=${CWA_API_KEY}`
+          const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(cwaUrl)}`
           const response = await fetch(url)
           const data = await response.json()
 
