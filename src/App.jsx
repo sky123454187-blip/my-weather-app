@@ -67,7 +67,7 @@ export default function App() {
     if (found) {
       setCity(found.name)
       setCurrentCoords({ lat: found.lat, lon: found.lon })
-      fetchWeather(found.lat, found.lon)
+      fetchWeather(found.name)
     } else {
       setError(`找不到「${cityName}」，請從建議中選擇或試試其他城鎮名稱`)
       setLoading(false)
@@ -93,17 +93,19 @@ export default function App() {
   const loadFavorite = (fav) => {
     setCity(fav.name)
     setCurrentCoords({ lat: fav.lat, lon: fav.lon })
-    fetchWeather(fav.lat, fav.lon)
+    fetchWeather(fav.name)
   }
 
   // 判斷當前城市是否已收藏
   const isFavorited = favorites.some(fav => fav.name === city)
 
-  // 獲取天氣數據
-  const fetchWeather = async (lat, lon) => {
+  // 獲取天氣數據 - 使用中央氣象署 API
+  const CWA_API_KEY = 'CWA-E142368F-F6DA-457A-AEDF-3D5BCF20BFF1'
+
+  const fetchWeather = async (cityName) => {
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`
-      console.log('Fetching weather:', url)
+      const url = `https://opendata.cwa.gov.tw/api/v1/rest/forecasts?locationName=${encodeURIComponent(cityName)}&Authorization=${CWA_API_KEY}`
+      console.log('Fetching weather from CWA:', url)
 
       const response = await fetch(url)
       console.log('Response status:', response.status)
@@ -115,12 +117,16 @@ export default function App() {
       const data = await response.json()
       console.log('Weather data received:', data)
 
-      if (data.current && data.daily) {
-        setWeather(data.current)
-        setForecast(data.daily)
+      if (data.records && data.records.location && data.records.location.length > 0) {
+        const location = data.records.location[0]
+
+        // 提取當前天氣和預報
+        const weatherData = processWeatherData(location.weatherElement)
+        setWeather(weatherData.current)
+        setForecast(weatherData.forecast)
         setError('')
       } else {
-        throw new Error('Invalid API response format')
+        throw new Error('未找到該地區的天氣資料')
       }
       setLoading(false)
     } catch (err) {
@@ -130,12 +136,63 @@ export default function App() {
     }
   }
 
+  // 處理中央氣象署的天氣數據
+  const processWeatherData = (weatherElements) => {
+    const current = {}
+    const forecast = { time: [], temperature_2m_max: [], temperature_2m_min: [], precipitation_probability_max: [], weather_code: [] }
+
+    weatherElements.forEach(element => {
+      const name = element.elementName
+      if (element.time && element.time.length > 0) {
+        const firstTime = element.time[0]
+
+        // 處理當前天氣
+        if (name === '氣溫') current.temperature_2m = parseFloat(firstTime.parameter?.parameterValue) || 0
+        if (name === '相對濕度') current.relative_humidity_2m = parseInt(firstTime.parameter?.parameterValue) || 0
+        if (name === '風速' || name === '風速(平均)') current.wind_speed_10m = parseFloat(firstTime.parameter?.parameterValue) * 3.6 || 0 // 轉換為 km/h
+        if (name === '天氣現象') current.weather_code = getWeatherCode(firstTime.parameter?.parameterValue)
+
+        // 處理預報資料
+        if (name === '最高溫度') {
+          element.time.forEach(t => forecast.temperature_2m_max.push(parseFloat(t.parameter?.parameterValue) || 0))
+          element.time.forEach(t => forecast.time.push(t.startTime?.split('T')[0]))
+        }
+        if (name === '最低溫度') {
+          element.time.forEach(t => forecast.temperature_2m_min.push(parseFloat(t.parameter?.parameterValue) || 0))
+        }
+        if (name === '降雨機率') {
+          element.time.forEach(t => forecast.precipitation_probability_max.push(parseInt(t.parameter?.parameterValue) || 0))
+        }
+        if (name === '天氣現象') {
+          element.time.forEach(t => forecast.weather_code.push(getWeatherCode(t.parameter?.parameterValue)))
+        }
+      }
+    })
+
+    return { current, forecast }
+  }
+
+  // 將中央氣象署天氣代碼轉換為 WMO 代碼
+  const getWeatherCode = (cwaDescription) => {
+    if (!cwaDescription) return 0
+    const desc = cwaDescription.toLowerCase()
+
+    if (desc.includes('晴')) return 0
+    if (desc.includes('多雲') || desc.includes('陰')) return 3
+    if (desc.includes('陣雨') || desc.includes('雷')) return 80
+    if (desc.includes('雨')) return 61
+    if (desc.includes('雪')) return 71
+    if (desc.includes('霧')) return 45
+
+    return 0
+  }
+
   // 首次載入時搜索預設城市
   useEffect(() => {
     const defaultCity = taiwanLocations.find(loc => loc.name === city)
     if (defaultCity) {
       setCurrentCoords({ lat: defaultCity.lat, lon: defaultCity.lon })
-      fetchWeather(defaultCity.lat, defaultCity.lon)
+      fetchWeather(city)
     }
   }, [])
 
@@ -188,7 +245,7 @@ export default function App() {
     setCurrentCoords({ lat: location.lat, lon: location.lon })
     setSearchInput('')
     setSuggestions([])
-    fetchWeather(location.lat, location.lon)
+    fetchWeather(location.name)
   }
 
   // 比較模式：加入城市到比較列表
@@ -237,17 +294,21 @@ export default function App() {
       const fav = favorites.find(f => f.name === favName)
       if (fav) {
         try {
-          const response = await fetch(
-            `https://api.open-meteo.com/v1/forecast?latitude=${fav.lat}&longitude=${fav.lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`
-          )
+          const url = `https://opendata.cwa.gov.tw/api/v1/rest/forecasts?locationName=${encodeURIComponent(favName)}&Authorization=${CWA_API_KEY}`
+          const response = await fetch(url)
           const data = await response.json()
-          newCompareList.push({
-            name: fav.name,
-            lat: fav.lat,
-            lon: fav.lon,
-            weather: data.current,
-            forecast: data.daily
-          })
+
+          if (data.records && data.records.location && data.records.location.length > 0) {
+            const location = data.records.location[0]
+            const weatherData = processWeatherData(location.weatherElement)
+            newCompareList.push({
+              name: fav.name,
+              lat: fav.lat,
+              lon: fav.lon,
+              weather: weatherData.current,
+              forecast: weatherData.forecast
+            })
+          }
         } catch (err) {
           console.error(`Error fetching weather for ${fav.name}:`, err)
         }
