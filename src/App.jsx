@@ -115,7 +115,15 @@ export default function App() {
         throw new Error(`API error: ${response.status}`)
       }
 
-      const data = await response.json()
+      const responseText = await response.text()
+      console.log('Raw response:', responseText.substring(0, 500))
+
+      let data
+      try {
+        data = JSON.parse(responseText)
+      } catch (e) {
+        throw new Error(`Invalid JSON response: ${responseText.substring(0, 200)}`)
+      }
       console.log('Weather data received:', data)
 
       if (data.records && data.records.location && data.records.location.length > 0) {
