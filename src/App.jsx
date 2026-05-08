@@ -105,8 +105,8 @@ export default function App() {
   const fetchWeather = async (cityName) => {
     try {
       const cwaUrl = `https://opendata.cwa.gov.tw/api/v1/rest/forecasts?locationName=${encodeURIComponent(cityName)}&Authorization=${CWA_API_KEY}`
-      const url = `https://thingproxy.freeboard.io/fetch/${cwaUrl}`
-      console.log('Fetching weather from CWA via proxy:', url)
+      const url = `https://weather.sky123454187.workers.dev/?url=${encodeURIComponent(cwaUrl)}`
+      console.log('Fetching weather from CWA via Worker:', url)
 
       const response = await fetch(url)
       console.log('Response status:', response.status)
@@ -296,7 +296,7 @@ export default function App() {
       if (fav) {
         try {
           const cwaUrl = `https://opendata.cwa.gov.tw/api/v1/rest/forecasts?locationName=${encodeURIComponent(favName)}&Authorization=${CWA_API_KEY}`
-          const url = `https://thingproxy.freeboard.io/fetch/${cwaUrl}`
+          const url = `https://weather.sky123454187.workers.dev/?url=${encodeURIComponent(cwaUrl)}`
           const response = await fetch(url)
           const data = await response.json()
 
